@@ -1,0 +1,48 @@
+# Environment
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Data and Logs
+logs/*.log
+logs/app.log
+data/attachments/*
+data/reports/*
+!data/attachments/.gitkeep
+!data/reports/.gitkeep
+
+# Process Management
+*.pid
+mail_verifier.pid
+nohup.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.sqlite3
+*.db
+
+# Claude Code
+.claude/
+
+# Temp data files
+data/*.html
+data/*.png
+data/*.json

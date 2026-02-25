@@ -1,0 +1,37 @@
+[Unit]
+Description=Mail Address Verifier - Email Security Analysis Service
+Documentation=https://github.com/mail-address-verifier
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/mail-address-verifier
+Environment=PYTHONPATH=/opt/mail-address-verifier
+Environment=PATH=/opt/mail-address-verifier/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ExecStart=/opt/mail-address-verifier/venv/bin/python3 /opt/mail-address-verifier/src/main.py
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Logging
+StandardOutput=append:/opt/mail-address-verifier/logs/app_console.log
+StandardError=append:/opt/mail-address-verifier/logs/app_console.log
+
+# Security
+NoNewPrivileges=false
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=65535
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
