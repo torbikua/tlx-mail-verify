@@ -2,6 +2,7 @@ import requests
 import re
 from typing import Dict, Any, List, Optional
 from src.utils.logger import logger
+from src.analyzers.data.email_lists import DISPOSABLE_DOMAINS, FREE_PROVIDERS
 
 
 class OSINTAnalyzer:
@@ -84,11 +85,16 @@ class OSINTAnalyzer:
 
         username = email.split('@')[0]
 
-        # Common social platforms to check
+        # Social platforms to check (expanded from 3 to 8)
         platforms = {
             'github': f'https://github.com/{username}',
             'twitter': f'https://twitter.com/{username}',
             'linkedin': f'https://linkedin.com/in/{username}',
+            'instagram': f'https://instagram.com/{username}',
+            'facebook': f'https://facebook.com/{username}',
+            'reddit': f'https://reddit.com/user/{username}',
+            'medium': f'https://medium.com/@{username}',
+            'keybase': f'https://keybase.io/{username}',
         }
 
         for platform, url in platforms.items():
@@ -188,27 +194,12 @@ class OSINTAnalyzer:
     def _is_disposable_email(self, email: str) -> bool:
         """Check if email is from a disposable email provider"""
         domain = email.split('@')[-1].lower()
-
-        disposable_domains = [
-            'tempmail.com', 'guerrillamail.com', '10minutemail.com',
-            'mailinator.com', 'throwaway.email', 'temp-mail.org',
-            'fakeinbox.com', 'maildrop.cc', 'yopmail.com',
-            'getnada.com', 'trashmail.com', 'sharklasers.com'
-        ]
-
-        return domain in disposable_domains
+        return domain in DISPOSABLE_DOMAINS
 
     def _is_free_provider(self, email: str) -> bool:
         """Check if email is from a free email provider"""
         domain = email.split('@')[-1].lower()
-
-        free_providers = [
-            'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
-            'mail.ru', 'yandex.ru', 'icloud.com', 'aol.com',
-            'protonmail.com', 'zoho.com'
-        ]
-
-        return domain in free_providers
+        return domain in FREE_PROVIDERS
 
     def search_linkedin(self, name: str, company: str = None) -> Dict[str, Any]:
         """

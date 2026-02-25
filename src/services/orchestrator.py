@@ -9,6 +9,7 @@ from src.analyzers.ip_analyzer import IPAnalyzer
 from src.analyzers.website_analyzer import WebsiteAnalyzer
 from src.analyzers.osint_analyzer import OSINTAnalyzer
 from src.analyzers.virustotal_analyzer import VirusTotalAnalyzer
+from src.analyzers.content_analyzer import ContentAnalyzer
 from src.services.claude_service import ClaudeService
 from src.services.openai_service import OpenAIService
 from src.services.perplexity_service import PerplexityService
@@ -28,6 +29,7 @@ class Orchestrator:
         self.ip_analyzer = IPAnalyzer()
         self.website_analyzer = WebsiteAnalyzer()
         self.osint_analyzer = OSINTAnalyzer()
+        self.content_analyzer = ContentAnalyzer()
         self.virustotal_analyzer = VirusTotalAnalyzer()
 
         # Initialize AI service based on configuration
@@ -188,7 +190,7 @@ class Orchestrator:
             analysis_data['overall_score'] = overall_score
 
             # Determine risk level
-            risk_level = self._determine_risk_level(overall_score, ai_result.get('risk_level'))
+            risk_level = self._determine_risk_level(overall_score, ai_result.get('risk_level'), analysis_data)
             analysis_data['risk_level'] = risk_level
 
             # Step 6: Save results to database
@@ -337,7 +339,8 @@ class Orchestrator:
                 'ip_location': ip_info.get('geolocation'),
                 'ip_blacklisted': blacklist_info.get('blacklisted'),
                 'blacklist_count': blacklist_info.get('blacklist_count', 0),
-                'is_proxy': proxy_info.get('is_proxy')
+                'is_proxy': proxy_info.get('is_proxy'),
+                'ip_detailed_info': ip_info.get('detailed_info')
             })
 
         # Website analysis
@@ -395,6 +398,7 @@ class Orchestrator:
 
             # Extract and scan URLs
             urls = self.email_parser.extract_urls(raw_email)
+            analysis['_extracted_urls'] = urls
             url_results = []
 
             # Limit URL scanning to first 10 URLs to avoid API limits
@@ -413,6 +417,23 @@ class Orchestrator:
                 'virustotal_enabled': False
             })
 
+        # Content analysis (phishing patterns, urgency, suspicious URLs)
+        body_text = email_data.get('body_text', '') or ''
+        body_html = email_data.get('body_html', '') or ''
+        extracted_urls = analysis.get('_extracted_urls') or self.email_parser.extract_urls(raw_email)
+        subject = email_data.get('subject', '') or ''
+
+        logger.info("Running content analysis")
+        content_analysis = self.content_analyzer.analyze_content(
+            body_text, body_html, extracted_urls, subject, domain
+        )
+        analysis['content_analysis'] = content_analysis
+        analysis['content_risk_score'] = content_analysis.get('content_risk_score', 0)
+
+        # Add email body for AI analysis (truncated)
+        analysis['body_text'] = body_text[:3000] if body_text else ''
+        analysis['body_html_preview'] = body_html[:1000] if body_html else ''
+
         # Add email data
         analysis.update({
             'from_address': email_data.get('from_address'),
@@ -426,58 +447,163 @@ class Orchestrator:
         return analysis
 
     def _calculate_overall_score(self, data: Dict[str, Any]) -> int:
-        """Calculate overall trust score (0-100)"""
-        score = 100
+        """Calculate overall trust score (0-100) using weighted categories"""
 
-        # Authentication (40 points)
+        # Category weights (must sum to 100)
+        WEIGHTS = {
+            'authentication': 25,
+            'content': 25,
+            'domain': 15,
+            'ip': 15,
+            'virustotal': 10,
+            'website': 5,
+            'osint': 5,
+        }
+
+        scores = {}
+
+        # --- Authentication (0-100) ---
+        auth_score = 100
         if not data.get('dkim', {}).get('valid'):
-            score -= 15
+            auth_score -= 40
         if not data.get('spf', {}).get('valid'):
-            score -= 15
+            auth_score -= 35
         if not data.get('dmarc', {}).get('valid'):
-            score -= 10
+            auth_score -= 25
+        scores['authentication'] = max(0, auth_score)
 
-        # Domain (20 points)
+        # --- Content (0-100) --- inverted risk score
+        content_risk = data.get('content_risk_score', 0)
+        scores['content'] = max(0, 100 - content_risk)
+
+        # --- Domain (0-100) ---
+        domain_score = 100
         domain_age = data.get('domain_age_days')
         if domain_age is not None:
-            if domain_age < 30:
-                score -= 15
+            if domain_age < 7:
+                domain_score -= 80
+            elif domain_age < 30:
+                domain_score -= 50
+            elif domain_age < 90:
+                domain_score -= 25
             elif domain_age < 365:
-                score -= 5
-
-        # IP (20 points)
-        if data.get('ip_blacklisted'):
-            score -= 20
-        if data.get('is_proxy'):
-            score -= 10
-
-        # Website (10 points)
-        if not data.get('website_exists'):
-            score -= 5
-        if not data.get('ssl_valid'):
-            score -= 5
-
-        # OSINT (10 points)
-        if data.get('email_in_breaches'):
-            score -= 5
+                domain_score -= 10
+        else:
+            domain_score -= 15
         if data.get('is_disposable'):
-            score -= 5
+            domain_score -= 40
+        scores['domain'] = max(0, domain_score)
 
-        return max(0, min(100, score))
+        # --- IP (0-100) ---
+        ip_score = 100
+        if data.get('ip_blacklisted'):
+            bl_count = data.get('blacklist_count', 1)
+            ip_score -= min(60, bl_count * 20)
+        if data.get('is_proxy'):
+            ip_score -= 20
+        detailed_ip = data.get('ip_detailed_info') or {}
+        if detailed_ip.get('is_tor'):
+            ip_score -= 30
+        if detailed_ip.get('is_abuser'):
+            ip_score -= 25
+        if detailed_ip.get('is_datacenter'):
+            ip_score -= 10
+        scores['ip'] = max(0, ip_score)
 
-    def _determine_risk_level(self, score: int, ai_risk: str) -> str:
-        """Determine final risk level"""
-        # Trust AI's assessment primarily
-        if ai_risk in ['green', 'yellow', 'red']:
+        # --- VirusTotal (0-100) ---
+        vt_score = 100
+        for att in data.get('virustotal_attachments', []):
+            if att.get('is_malicious'):
+                vt_score = 0
+                break
+            if att.get('detections', 0) > 0:
+                vt_score -= att['detections'] * 10
+        for url_data in data.get('virustotal_urls', []):
+            if url_data.get('is_malicious'):
+                vt_score -= 30
+            elif url_data.get('detections', 0) > 0:
+                vt_score -= url_data['detections'] * 5
+        scores['virustotal'] = max(0, vt_score)
+
+        # --- Website (0-100) ---
+        website_score = 100
+        if not data.get('website_exists'):
+            website_score -= 30
+        if not data.get('ssl_valid'):
+            website_score -= 40
+        ssl_days = data.get('ssl_days_left')
+        if ssl_days is not None and ssl_days < 7:
+            website_score -= 30
+        scores['website'] = max(0, website_score)
+
+        # --- OSINT (0-100) ---
+        osint_score = 100
+        if data.get('email_in_breaches'):
+            osint_score -= 25
+        if data.get('is_disposable'):
+            osint_score -= 50
+        if not data.get('social_profiles_found'):
+            osint_score -= 10
+        scores['osint'] = max(0, osint_score)
+
+        # --- Weighted total ---
+        total = sum(scores[cat] * WEIGHTS[cat] / 100 for cat in WEIGHTS)
+
+        # Store breakdown for PDF report
+        data['score_breakdown'] = scores
+        data['score_weights'] = WEIGHTS
+
+        return max(0, min(100, int(total)))
+
+    def _determine_risk_level(self, score: int, ai_risk: str, data: Dict[str, Any] = None) -> str:
+        """Determine final risk level with AI-technical consistency check"""
+        data = data or {}
+
+        # Score-based determination
+        if score >= 75:
+            score_risk = 'green'
+        elif score >= 45:
+            score_risk = 'yellow'
+        else:
+            score_risk = 'red'
+
+        if ai_risk not in ('green', 'yellow', 'red'):
+            return score_risk
+
+        # AI agrees with score
+        if ai_risk == score_risk:
             return ai_risk
 
-        # Fallback to score-based
-        if score >= config.RISK_GREEN_THRESHOLD:
-            return 'green'
-        elif score >= config.RISK_YELLOW_THRESHOLD:
-            return 'yellow'
+        risk_order = {'green': 0, 'yellow': 1, 'red': 2}
+        ai_val = risk_order[ai_risk]
+        score_val = risk_order[score_risk]
+
+        # Disagreement by more than 1 level: use the MORE CAUTIOUS one
+        if abs(ai_val - score_val) > 1:
+            logger.warning(
+                f"AI/score disagreement: AI={ai_risk}, Score={score_risk} "
+                f"(score={score}). Using more cautious assessment."
+            )
+            data['risk_disagreement'] = True
+            data['ai_original_risk'] = ai_risk
+            data['score_original_risk'] = score_risk
+            return ai_risk if ai_val > score_val else score_risk
+
+        # Disagreement by 1 level: weighted average (AI 60%, score 40%)
+        combined = ai_val * 0.6 + score_val * 0.4
+        if combined >= 1.5:
+            result = 'red'
+        elif combined >= 0.5:
+            result = 'yellow'
         else:
-            return 'red'
+            result = 'green'
+
+        if result != ai_risk:
+            data['risk_disagreement'] = True
+            data['ai_original_risk'] = ai_risk
+            data['score_original_risk'] = score_risk
+
+        return result
 
     def _save_results(self, session, check_id: int, data: Dict[str, Any]):
         """Save analysis results to database"""

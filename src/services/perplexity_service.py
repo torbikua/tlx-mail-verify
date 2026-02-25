@@ -150,7 +150,25 @@ class PerplexityService:
 - Социальные профили найдены: {data.get('social_profiles_found', False)}
 - Одноразовый email: {data.get('is_disposable', False)}
 
+**7. Текст письма (фрагмент):**
+```
+{(data.get('body_text', '') or '')[:2000] or 'Текст письма не извлечён'}
+```
+
+**8. Автоматический анализ содержимого:**
+- Оценка риска содержимого: {data.get('content_risk_score', 'N/A')}/100
+- Индикаторы срочности: {(data.get('content_analysis') or {{}}).get('urgency_indicators', {{}}).get('count', 0)} обнаружено
+- Запросы учётных данных: {'ОБНАРУЖЕНЫ' if (data.get('content_analysis') or {{}}).get('credential_requests', {{}}).get('detected') else 'Нет'}
+- Язык угроз: {'ОБНАРУЖЕН' if (data.get('content_analysis') or {{}}).get('threat_language', {{}}).get('detected') else 'Нет'}
+- Подозрительные ссылки: {(data.get('content_analysis') or {{}}).get('suspicious_urls', {{}}).get('total', 0)}
+
+{self._format_ip_details(data.get('ip_detailed_info'))}
+
+{self._format_vt_results(data)}
+
 **ЗАДАЧА:**
+
+ВАЖНО: Учитывай результаты автоматического анализа содержимого (раздел 8). Если обнаружены индикаторы фишинга (запросы учётных данных, язык срочности/угроз, подозрительные ссылки), это СУЩЕСТВЕННЫЕ факторы для вердикта. Не игнорируй технические данные в пользу "общего впечатления".
 
 Проанализируй все данные и предоставь:
 
@@ -225,6 +243,48 @@ class PerplexityService:
             parts.append(f"ISP: {geo['isp']}")
 
         return ", ".join(parts) if parts else "N/A"
+
+    def _format_ip_details(self, detailed_ip: Dict) -> str:
+        """Format detailed IP infrastructure flags for prompt"""
+        if not detailed_ip:
+            return ""
+        parts = ["**Детали IP инфраструктуры:**"]
+        flags = [
+            ('is_datacenter', 'Датацентр'),
+            ('is_vpn', 'VPN'),
+            ('is_tor', 'Tor'),
+            ('is_proxy', 'Прокси'),
+            ('is_abuser', 'Абьюзер'),
+            ('is_mobile', 'Мобильная сеть'),
+            ('is_crawler', 'Краулер'),
+        ]
+        for key, label in flags:
+            val = detailed_ip.get(key)
+            if val is not None:
+                parts.append(f"- {label}: {'Да' if val else 'Нет'}")
+        abuse_score = detailed_ip.get('abuse_score')
+        if abuse_score is not None:
+            parts.append(f"- Оценка злоупотреблений: {abuse_score}")
+        return '\n'.join(parts) if len(parts) > 1 else ""
+
+    def _format_vt_results(self, data: Dict) -> str:
+        """Format VirusTotal results for prompt"""
+        vt_attachments = data.get('virustotal_attachments', [])
+        vt_urls = data.get('virustotal_urls', [])
+        if not vt_attachments and not vt_urls:
+            return "**9. VirusTotal:** Не проверялось"
+        parts = ["**9. Результаты VirusTotal:**"]
+        for att in vt_attachments:
+            if att.get('scanned'):
+                parts.append(f"- Файл {att.get('filename', '?')[:60]}: "
+                           f"{att.get('detections', 0)}/{att.get('total_scanners', 0)} обнаружений")
+        for url_d in vt_urls[:5]:
+            if url_d.get('scanned'):
+                parts.append(f"- URL {url_d.get('url', '')[:60]}: "
+                           f"{url_d.get('detections', 0)}/{url_d.get('total_scanners', 0)} обнаружений")
+        if len(parts) == 1:
+            parts.append("- Результатов нет")
+        return '\n'.join(parts)
 
     def _extract_verdict(self, analysis_text: str) -> Dict[str, Any]:
         """Extract structured data from Perplexity's response"""

@@ -187,7 +187,7 @@ class ClaudeService:
         return ", ".join(parts) if parts else "N/A"
 
     def _extract_verdict(self, analysis_text: str) -> Dict[str, Any]:
-        """Extract structured data from Claude's response"""
+        """Extract structured data from Claude's response (robust parsing)"""
         import re
 
         result = {
@@ -199,40 +199,67 @@ class ClaudeService:
         }
 
         try:
-            # Extract verdict
-            verdict_match = re.search(r'---ВЕРДИКТ---\s*\n\s*([А-ЯЁ]+)', analysis_text)
+            # Extract verdict — flexible regex allowing brackets, quotes, spaces
+            verdict_match = re.search(
+                r'---ВЕРДИКТ---\s*\n\s*[\["\']?([А-ЯЁA-Z\s/]+?)[\]"\']?(?:\s*\n|$)',
+                analysis_text, re.IGNORECASE
+            )
             if verdict_match:
-                result['verdict'] = verdict_match.group(1)
+                result['verdict'] = verdict_match.group(1).strip()
+            else:
+                # Fallback: keyword detection in full text
+                text_lower = analysis_text.lower()
+                if 'легитимное' in text_lower:
+                    result['verdict'] = 'ЛЕГИТИМНОЕ'
+                elif 'фишинг' in text_lower:
+                    result['verdict'] = 'ФИШИНГ'
+                elif 'подозрительн' in text_lower:
+                    result['verdict'] = 'ПОДОЗРИТЕЛЬНОЕ'
 
             # Extract risk level
-            risk_match = re.search(r'---РИСК---\s*\n\s*(\w+)', analysis_text)
+            risk_match = re.search(r'---РИСК---\s*\n\s*[\["\']?(\w+)[\]"\']?', analysis_text)
             if risk_match:
                 result['risk_level'] = risk_match.group(1).lower()
+            else:
+                # Derive from verdict
+                verdict_upper = result['verdict'].upper()
+                if 'ЛЕГИТИМ' in verdict_upper:
+                    result['risk_level'] = 'green'
+                elif 'ФИШИНГ' in verdict_upper:
+                    result['risk_level'] = 'red'
+                else:
+                    result['risk_level'] = 'yellow'
 
             # Extract confidence
             confidence_match = re.search(r'---УВЕРЕННОСТЬ---\s*\n\s*(\d+)', analysis_text)
             if confidence_match:
                 result['confidence'] = int(confidence_match.group(1))
+            elif result['verdict'] != 'Невозможно определить':
+                result['confidence'] = 70
 
-            # Extract findings
-            findings_match = re.search(r'---НАХОДКИ---\s*\n((?:- .+\n?)+)', analysis_text)
+            # Extract findings — flexible bullet parsing
+            findings_match = re.search(
+                r'---НАХОДКИ---\s*\n(.+?)(?=\n---|\Z)', analysis_text, re.DOTALL
+            )
             if findings_match:
-                findings_text = findings_match.group(1)
+                raw = findings_match.group(1)
+                lines = re.split(r'\n\s*[-•*]\s*|\n\s*\d+[.)]\s*', raw)
                 result['key_findings'] = [
-                    line.strip('- ').strip()
-                    for line in findings_text.split('\n')
-                    if line.strip().startswith('-')
-                ]
+                    line.strip() for line in lines
+                    if line.strip() and len(line.strip()) > 10
+                ][:10]
 
-            # Extract recommendations
-            recommendations_match = re.search(r'---РЕКОМЕНДАЦИИ---\s*\n((?:- .+\n?)+)', analysis_text)
-            if recommendations_match:
-                rec_text = recommendations_match.group(1)
+            # Extract recommendations — flexible bullet parsing
+            rec_match = re.search(
+                r'---РЕКОМЕНДАЦИИ---\s*\n(.+?)(?=\n---|\Z)', analysis_text, re.DOTALL
+            )
+            if rec_match:
+                raw = rec_match.group(1)
+                lines = re.split(r'\n\s*[-•*]\s*|\n\s*\d+[.)]\s*', raw)
                 result['recommendations'] = [
-                    line.strip('- ').strip()
-                    for line in rec_text.split('\n')
-                    if line.strip().startswith('-')
-                ]
+                    line.strip() for line in lines
+                    if line.strip() and len(line.strip()) > 10
+                ][:10]
 
         except Exception as e:
             logger.error(f"Failed to parse Claude response: {e}")

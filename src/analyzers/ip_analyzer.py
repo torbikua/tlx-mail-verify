@@ -1,5 +1,6 @@
 import requests
 import socket
+import time
 from typing import Dict, Any, List, Optional
 from src.utils.logger import logger
 
@@ -9,6 +10,8 @@ class IPAnalyzer:
 
     def __init__(self):
         self.timeout = 10
+        self._dns_cache = {}
+        self._cache_ttl = 3600  # 1 hour
 
     def analyze_ip(self, ip_address: str) -> Dict[str, Any]:
         """
@@ -104,13 +107,26 @@ class IPAnalyzer:
         Returns:
             Dictionary with blacklist check results
         """
-        # DNS-based blacklists
+        # DNS-based blacklists (expanded from 5 to 15)
         blacklists = [
+            # Tier 1: Most reliable
             'zen.spamhaus.org',
             'bl.spamcop.net',
+            'b.barracudacentral.org',
+            # Tier 2: Good reputation
             'dnsbl.sorbs.net',
             'cbl.abuseat.org',
-            'b.barracudacentral.org'
+            'dnsbl-1.uceprotect.net',
+            'psbl.surriel.com',
+            'db.wpbl.info',
+            # Tier 3: Additional coverage
+            'all.s5h.net',
+            'bl.mailspike.net',
+            'dnsbl.dronebl.org',
+            'spam.dnsbl.anonmails.de',
+            'dnsbl.spfbl.net',
+            'combined.abuse.ch',
+            'spam.abuse.ch',
         ]
 
         results = {}
@@ -129,9 +145,27 @@ class IPAnalyzer:
             'details': results
         }
 
+    def _cached_dns_lookup(self, query: str) -> bool:
+        """DNS lookup with TTL-based caching"""
+        now = time.time()
+        if query in self._dns_cache:
+            result, timestamp = self._dns_cache[query]
+            if now - timestamp < self._cache_ttl:
+                return result
+
+        try:
+            socket.gethostbyname(query)
+            self._dns_cache[query] = (True, now)
+            return True
+        except socket.gaierror:
+            self._dns_cache[query] = (False, now)
+            return False
+        except Exception:
+            return False
+
     def _check_single_blacklist(self, ip_address: str, blacklist: str) -> bool:
         """
-        Check IP against a single DNSBL
+        Check IP against a single DNSBL (with caching)
 
         Args:
             ip_address: IP address
@@ -141,18 +175,14 @@ class IPAnalyzer:
             True if blacklisted, False otherwise
         """
         try:
-            # Reverse the IP for DNSBL query
             reversed_ip = '.'.join(reversed(ip_address.split('.')))
             query = f"{reversed_ip}.{blacklist}"
 
-            # Try to resolve - if it resolves, IP is blacklisted
-            socket.gethostbyname(query)
-            logger.warning(f"IP {ip_address} found in blacklist: {blacklist}")
-            return True
+            is_listed = self._cached_dns_lookup(query)
+            if is_listed:
+                logger.warning(f"IP {ip_address} found in blacklist: {blacklist}")
+            return is_listed
 
-        except socket.gaierror:
-            # Not found in blacklist (normal case)
-            return False
         except Exception as e:
             logger.debug(f"Error checking blacklist {blacklist} for {ip_address}: {e}")
             return False

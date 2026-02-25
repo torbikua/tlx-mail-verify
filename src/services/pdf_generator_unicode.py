@@ -235,12 +235,19 @@ class PDFGenerator:
             # Executive summary
             self._create_executive_summary(pdf, analysis_data)
 
+            # Visual risk bar
+            self._draw_risk_bar(pdf, analysis_data.get('overall_score', 0), analysis_data)
+
+            # Score breakdown table
+            self._create_score_breakdown(pdf, analysis_data)
+
             # Detailed sections
             self._create_authentication_section(pdf, analysis_data)
             self._create_domain_section(pdf, analysis_data)
             self._create_ip_section(pdf, analysis_data)
             self._create_website_section(pdf, analysis_data)
             self._create_osint_section(pdf, analysis_data)
+            self._create_content_analysis_section(pdf, analysis_data)
             self._create_virustotal_section(pdf, analysis_data)
             self._create_ai_analysis_section(pdf, analysis_data)
 
@@ -255,6 +262,179 @@ class PDFGenerator:
             import traceback
             logger.error(traceback.format_exc())
             return False
+
+    def _draw_risk_bar(self, pdf: FPDF, score: int, data: Dict[str, Any]):
+        """Draw a visual score bar (0-100)"""
+        font = 'DejaVu' if pdf.unicode_font_loaded else 'Arial'
+
+        bar_x = 10
+        bar_y = pdf.get_y() + 2
+        bar_width = 190
+        bar_height = 8
+
+        # Background (gray)
+        pdf.set_fill_color(220, 220, 220)
+        pdf.rect(bar_x, bar_y, bar_width, bar_height, 'F')
+
+        # Score fill (color based on score)
+        if score >= 75:
+            pdf.set_fill_color(40, 167, 69)   # Green
+        elif score >= 45:
+            pdf.set_fill_color(255, 193, 7)    # Yellow
+        else:
+            pdf.set_fill_color(220, 53, 69)    # Red
+
+        fill_width = max(1, bar_width * score / 100)
+        pdf.rect(bar_x, bar_y, fill_width, bar_height, 'F')
+
+        # Border
+        pdf.set_draw_color(100, 100, 100)
+        pdf.rect(bar_x, bar_y, bar_width, bar_height, 'D')
+
+        # Score text centered on bar
+        pdf.set_font(font, '', 8)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_xy(bar_x, bar_y)
+        label = f'Оценка доверия: {score}/100' if pdf.unicode_font_loaded else f'Trust Score: {score}/100'
+        pdf.cell(bar_width, bar_height, label, 0, 0, 'C')
+        pdf.set_y(bar_y + bar_height + 5)
+
+    def _create_score_breakdown(self, pdf: FPDF, data: Dict[str, Any]):
+        """Create a category-by-category score table"""
+        font = 'DejaVu' if pdf.unicode_font_loaded else 'Arial'
+        breakdown = data.get('score_breakdown', {})
+        weights = data.get('score_weights', {})
+
+        if not breakdown:
+            return
+
+        self._ensure_space(pdf, 60)
+
+        title = 'ДЕТАЛИЗАЦИЯ ОЦЕНКИ' if pdf.unicode_font_loaded else 'SCORE BREAKDOWN'
+        self._set_font_safe(pdf, font, 'B', 11)
+        pdf.cell(0, 8, title, 0, 1)
+        pdf.ln(2)
+
+        category_names_ru = {
+            'authentication': 'Аутентификация (DKIM/SPF/DMARC)',
+            'content': 'Содержимое письма',
+            'domain': 'Домен',
+            'ip': 'IP отправителя',
+            'virustotal': 'VirusTotal',
+            'website': 'Веб-сайт',
+            'osint': 'OSINT / репутация',
+        }
+        category_names_en = {
+            'authentication': 'Authentication',
+            'content': 'Content Analysis',
+            'domain': 'Domain',
+            'ip': 'Sender IP',
+            'virustotal': 'VirusTotal',
+            'website': 'Website',
+            'osint': 'OSINT / Reputation',
+        }
+        names = category_names_ru if pdf.unicode_font_loaded else category_names_en
+
+        # Table header
+        pdf.set_fill_color(240, 240, 240)
+        self._set_font_safe(pdf, font, 'B', 9)
+        col1, col2, col3, col4 = 85, 25, 20, 30
+        pdf.cell(col1, 6, 'Категория' if pdf.unicode_font_loaded else 'Category', 1, 0, 'L', True)
+        pdf.cell(col2, 6, 'Оценка' if pdf.unicode_font_loaded else 'Score', 1, 0, 'C', True)
+        pdf.cell(col3, 6, 'Вес' if pdf.unicode_font_loaded else 'Wt', 1, 0, 'C', True)
+        pdf.cell(col4, 6, 'Вклад' if pdf.unicode_font_loaded else 'Impact', 1, 1, 'C', True)
+
+        pdf.set_font(font, '', 9)
+        for cat in ['authentication', 'content', 'domain', 'ip', 'virustotal', 'website', 'osint']:
+            score = breakdown.get(cat, 0)
+            weight = weights.get(cat, 0)
+            contribution = score * weight / 100
+
+            name = names.get(cat, cat)
+
+            # Color code the score
+            if score >= 70:
+                pdf.set_text_color(40, 167, 69)
+            elif score >= 40:
+                pdf.set_text_color(200, 150, 0)
+            else:
+                pdf.set_text_color(220, 53, 69)
+
+            pdf.cell(col1, 6, name, 1, 0, 'L')
+            pdf.cell(col2, 6, f'{score}', 1, 0, 'C')
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(col3, 6, f'{weight}%', 1, 0, 'C')
+            pdf.cell(col4, 6, f'{contribution:.1f}', 1, 1, 'C')
+
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(5)
+
+    def _create_content_analysis_section(self, pdf: FPDF, data: Dict[str, Any]):
+        """Create content analysis section in PDF"""
+        content = data.get('content_analysis', {})
+        if not content:
+            return
+
+        font = 'DejaVu' if pdf.unicode_font_loaded else 'Arial'
+        title = '5.5 АНАЛИЗ СОДЕРЖИМОГО' if pdf.unicode_font_loaded else '5.5 CONTENT ANALYSIS'
+
+        self._ensure_space(pdf, 50)
+        self._set_font_safe(pdf, font, 'B', 12)
+        pdf.cell(0, 8, title, 0, 1)
+        pdf.set_draw_color(200, 200, 200)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(3)
+
+        risk_score = content.get('content_risk_score', 0)
+        risk_label = 'Оценка риска содержимого' if pdf.unicode_font_loaded else 'Content Risk Score'
+        self._add_info_row(pdf, risk_label, f'{risk_score}/100')
+
+        urgency = content.get('urgency_indicators', {})
+        urgency_label = 'Индикаторы срочности' if pdf.unicode_font_loaded else 'Urgency Indicators'
+        self._add_info_row(pdf, urgency_label, str(urgency.get('count', 0)))
+
+        creds = content.get('credential_requests', {})
+        creds_label = 'Запросы учётных данных' if pdf.unicode_font_loaded else 'Credential Requests'
+        creds_val = ('Обнаружены' if pdf.unicode_font_loaded else 'Detected') if creds.get('detected') else ('Нет' if pdf.unicode_font_loaded else 'No')
+        self._add_info_row(pdf, creds_label, creds_val)
+
+        threats = content.get('threat_language', {})
+        threats_label = 'Язык угроз' if pdf.unicode_font_loaded else 'Threat Language'
+        threats_val = ('Обнаружен' if pdf.unicode_font_loaded else 'Detected') if threats.get('detected') else ('Нет' if pdf.unicode_font_loaded else 'No')
+        self._add_info_row(pdf, threats_label, threats_val)
+
+        sus_urls = content.get('suspicious_urls', {})
+        total_sus = sus_urls.get('total', 0)
+        urls_label = 'Подозрительные ссылки' if pdf.unicode_font_loaded else 'Suspicious URLs'
+        self._add_info_row(pdf, urls_label, str(total_sus))
+
+        # Show details if suspicious items found
+        if urgency.get('patterns'):
+            pdf.ln(2)
+            pdf.set_font(font, '', 8)
+            detail_label = 'Найденные паттерны срочности: ' if pdf.unicode_font_loaded else 'Urgency patterns: '
+            pdf.multi_cell(0, 4, detail_label + ', '.join(urgency['patterns'][:5]))
+
+        if sus_urls.get('ip_based') or sus_urls.get('shortened') or sus_urls.get('mismatched_href'):
+            pdf.ln(1)
+            pdf.set_font(font, '', 8)
+            for ip_url in sus_urls.get('ip_based', [])[:3]:
+                pdf.multi_cell(0, 4, f'  IP-URL: {ip_url[:80]}')
+            for short_url in sus_urls.get('shortened', [])[:3]:
+                pdf.multi_cell(0, 4, f'  Short URL: {short_url[:80]}')
+            for mismatch in sus_urls.get('mismatched_href', [])[:3]:
+                pdf.multi_cell(0, 4, f'  Mismatch: {mismatch.get("display", "?")} -> {mismatch.get("actual", "?")}')
+
+        homograph = content.get('homograph_attack', {})
+        if homograph.get('detected'):
+            pdf.ln(1)
+            pdf.set_font(font, '', 8)
+            pdf.set_text_color(220, 53, 69)
+            hg_warn = 'ВНИМАНИЕ: Обнаружена атака гомоглифов!' if pdf.unicode_font_loaded else 'WARNING: Homograph attack detected!'
+            pdf.cell(0, 5, hg_warn, 0, 1)
+            pdf.set_text_color(0, 0, 0)
+
+        pdf.ln(3)
 
     def _create_title_page(self, pdf: FPDF, data: Dict[str, Any]):
         """Create title page"""
@@ -373,6 +553,29 @@ class PDFGenerator:
         pdf.cell(35, 7, ai_label, 0, 0)
         pdf.set_font(font, '', 10)
         pdf.cell(0, 7, ai_name, 0, 1)
+
+        # Overall score
+        overall_score = data.get('overall_score')
+        if overall_score is not None:
+            score_label = 'Общая оценка:' if pdf.unicode_font_loaded else 'Overall Score:'
+            self._set_font_safe(pdf, font, 'B', 10)
+            pdf.cell(35, 7, score_label, 0, 0)
+            pdf.set_font(font, '', 10)
+            pdf.cell(0, 7, f'{overall_score}/100', 0, 1)
+
+        # Risk disagreement warning
+        if data.get('risk_disagreement'):
+            pdf.ln(2)
+            pdf.set_font(font, '', 9)
+            pdf.set_text_color(200, 100, 0)
+            ai_risk = (data.get('ai_original_risk') or '').upper()
+            score_risk = (data.get('score_original_risk') or '').upper()
+            if pdf.unicode_font_loaded:
+                warning = f'Внимание: AI оценка ({ai_risk}) расходится с технической ({score_risk}). Использована более осторожная.'
+            else:
+                warning = f'Warning: AI assessment ({ai_risk}) disagrees with technical ({score_risk}). Using more cautious.'
+            pdf.multi_cell(0, 5, warning)
+            pdf.set_text_color(0, 0, 0)
 
         pdf.ln(5)
 

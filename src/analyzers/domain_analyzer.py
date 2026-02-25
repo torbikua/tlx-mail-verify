@@ -1,10 +1,12 @@
 import whois
 import dns.resolver
 import requests
+import unicodedata
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from src.utils.logger import logger
 from src.analyzers.ccTLD_whois import ccTLDWhoisChecker
+from src.analyzers.data.email_lists import DISPOSABLE_DOMAINS
 from config.config import config
 
 
@@ -277,63 +279,110 @@ class DomainAnalyzer:
         }
 
     def _is_disposable_domain(self, domain: str) -> bool:
-        """
-        Check if domain is a known disposable email provider
-
-        Args:
-            domain: Domain name
-
-        Returns:
-            True if disposable, False otherwise
-        """
-        disposable_domains = [
-            'tempmail.com', 'guerrillamail.com', '10minutemail.com',
-            'mailinator.com', 'throwaway.email', 'temp-mail.org',
-            'fakeinbox.com', 'maildrop.cc', 'yopmail.com'
-        ]
-
-        return domain.lower() in disposable_domains
+        """Check if domain is a known disposable email provider"""
+        return domain.lower() in DISPOSABLE_DOMAINS
 
     def _check_similar_domains(self, domain: str) -> List[str]:
-        """
-        Check for typosquatting - similar domain names
-
-        Args:
-            domain: Domain name
-
-        Returns:
-            List of similar domains that exist
-        """
+        """Check for typosquatting with expanded detection techniques"""
         similar_domains = []
-
-        # Common typosquatting techniques
         base_domain = domain.split('.')[0]
-        tld = domain.split('.')[-1]
+        tld = '.'.join(domain.split('.')[1:])
 
-        # Character substitution (simple version)
+        # Character substitution (expanded)
         substitutions = {
-            '0': 'o',
-            '1': 'l',
-            'l': '1',
-            'o': '0',
+            'o': ['0'], '0': ['o'], 'l': ['1', 'i'], '1': ['l', 'i'],
+            'i': ['1', 'l'], 'e': ['3'], '3': ['e'], 'a': ['4'],
+            's': ['5'], '5': ['s'], 'g': ['9', 'q'], '9': ['g'],
+            'b': ['d'], 'd': ['b'], 'n': ['m'], 'm': ['n'],
+            'w': ['vv'],
+        }
+        multi_substitutions = {
+            'rn': ['m'], 'cl': ['d'], 'nn': ['m'],
         }
 
-        variants = []
+        variants = set()
+
+        # 1. Single character substitution
         for i, char in enumerate(base_domain):
             if char in substitutions:
-                variant = base_domain[:i] + substitutions[char] + base_domain[i+1:]
-                variants.append(f"{variant}.{tld}")
+                for sub in substitutions[char]:
+                    variant = base_domain[:i] + sub + base_domain[i+1:]
+                    variants.add(f"{variant}.{tld}")
 
-        # Check if variants exist
-        for variant in variants[:5]:  # Limit to 5 checks
+        # 2. Multi-character substitution
+        for i in range(len(base_domain) - 1):
+            pair = base_domain[i:i+2]
+            if pair in multi_substitutions:
+                for sub in multi_substitutions[pair]:
+                    variant = base_domain[:i] + sub + base_domain[i+2:]
+                    variants.add(f"{variant}.{tld}")
+
+        # 3. Character omission
+        for i in range(len(base_domain)):
+            variant = base_domain[:i] + base_domain[i+1:]
+            if variant:
+                variants.add(f"{variant}.{tld}")
+
+        # 4. Character duplication
+        for i in range(len(base_domain)):
+            variant = base_domain[:i] + base_domain[i] + base_domain[i:]
+            variants.add(f"{variant}.{tld}")
+
+        # 5. Adjacent character swap
+        for i in range(len(base_domain) - 1):
+            chars = list(base_domain)
+            chars[i], chars[i+1] = chars[i+1], chars[i]
+            variants.add(f"{''.join(chars)}.{tld}")
+
+        # 6. Alternative TLDs
+        for alt_tld in ['com', 'net', 'org', 'info', 'biz', 'co']:
+            if alt_tld != tld:
+                variants.add(f"{base_domain}.{alt_tld}")
+
+        variants.discard(domain)
+
+        # Check if variants resolve (limit to 15 DNS queries)
+        for variant in list(variants)[:15]:
             try:
                 self.dns_resolver.resolve(variant, 'A')
                 similar_domains.append(variant)
-                logger.warning(f"Found similar domain: {variant}")
+                logger.warning(f"Found similar domain (typosquatting): {variant}")
             except:
                 pass
 
         return similar_domains
+
+    def check_homograph(self, domain: str) -> Dict[str, Any]:
+        """Check for IDN homograph attacks (e.g., Cyrillic 'а' instead of Latin 'a')"""
+        confusables = {
+            '\u0430': 'a', '\u0435': 'e', '\u043e': 'o', '\u0440': 'p',
+            '\u0441': 'c', '\u0443': 'y', '\u0445': 'x', '\u043d': 'h',
+            '\u0456': 'i', '\u0458': 'j',
+        }
+
+        try:
+            domain.encode('ascii')
+            has_non_ascii = False
+        except UnicodeEncodeError:
+            has_non_ascii = True
+
+        is_punycode = 'xn--' in domain.lower()
+
+        confusable_chars = []
+        for char in domain.split('.')[0]:
+            if char in confusables:
+                confusable_chars.append({
+                    'char': char,
+                    'looks_like': confusables[char],
+                    'name': unicodedata.name(char, 'UNKNOWN')
+                })
+
+        return {
+            'detected': has_non_ascii or is_punycode or len(confusable_chars) > 0,
+            'has_non_ascii': has_non_ascii,
+            'is_punycode': is_punycode,
+            'confusable_chars': confusable_chars[:5],
+        }
 
     def check_spf_record(self, domain: str) -> Dict[str, Any]:
         """
