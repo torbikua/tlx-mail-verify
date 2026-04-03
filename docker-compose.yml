@@ -23,7 +23,7 @@ services:
     depends_on:
       - mysql
     ports:
-      - "8080:8080"
+      - "8002:8002"
     volumes:
       - ./logs:/app/logs
       - ./data:/app/data

@@ -578,16 +578,17 @@ class Orchestrator:
         ai_val = risk_order[ai_risk]
         score_val = risk_order[score_risk]
 
-        # Disagreement by more than 1 level: use the MORE CAUTIOUS one
+        # Disagreement by more than 1 level (GREEN vs RED): compromise to YELLOW
+        # Neither side should completely override the other
         if abs(ai_val - score_val) > 1:
             logger.warning(
                 f"AI/score disagreement: AI={ai_risk}, Score={score_risk} "
-                f"(score={score}). Using more cautious assessment."
+                f"(score={score}). Using compromise YELLOW."
             )
             data['risk_disagreement'] = True
             data['ai_original_risk'] = ai_risk
             data['score_original_risk'] = score_risk
-            return ai_risk if ai_val > score_val else score_risk
+            return 'yellow'
 
         # Disagreement by 1 level: weighted average (AI 60%, score 40%)
         combined = ai_val * 0.6 + score_val * 0.4

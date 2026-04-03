@@ -90,7 +90,7 @@ class Config:
 
     # Web Admin
     WEB_HOST = os.getenv('WEB_HOST', '0.0.0.0')
-    WEB_PORT = int(os.getenv('WEB_PORT', 8080))
+    WEB_PORT = int(os.getenv('WEB_PORT', 8002))
     ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
     ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'changeme')
     SECRET_KEY = os.getenv('SECRET_KEY', os.urandom(24).hex())

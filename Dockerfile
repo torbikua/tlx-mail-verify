@@ -26,7 +26,7 @@ COPY . .
 RUN mkdir -p logs data/attachments data/reports
 
 # Expose web interface port
-EXPOSE 8080
+EXPOSE 8002
 
 # Run the application
 CMD ["python", "src/main.py"]

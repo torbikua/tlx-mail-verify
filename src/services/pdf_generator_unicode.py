@@ -418,12 +418,18 @@ class PDFGenerator:
         if sus_urls.get('ip_based') or sus_urls.get('shortened') or sus_urls.get('mismatched_href'):
             pdf.ln(1)
             pdf.set_font(font, '', 8)
+            pdf.set_x(pdf.l_margin)
             for ip_url in sus_urls.get('ip_based', [])[:3]:
-                pdf.multi_cell(0, 4, f'  IP-URL: {ip_url[:80]}')
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(0, 4, f'  IP-URL: {str(ip_url)[:80]}')
             for short_url in sus_urls.get('shortened', [])[:3]:
-                pdf.multi_cell(0, 4, f'  Short URL: {short_url[:80]}')
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(0, 4, f'  Short URL: {str(short_url)[:80]}')
             for mismatch in sus_urls.get('mismatched_href', [])[:3]:
-                pdf.multi_cell(0, 4, f'  Mismatch: {mismatch.get("display", "?")} -> {mismatch.get("actual", "?")}')
+                display = str(mismatch.get("display", "?"))[:60]
+                actual = str(mismatch.get("actual", "?"))[:60]
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(0, 4, f'  Mismatch: {display} -> {actual}')
 
         homograph = content.get('homograph_attack', {})
         if homograph.get('detected'):

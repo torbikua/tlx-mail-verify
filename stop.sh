@@ -4,7 +4,7 @@
 APP_NAME="mail-address-verifier"
 APP_DIR="/opt/mail-address-verifier"
 PID_FILE="$APP_DIR/app.pid"
-PORT=8080
+PORT=8002
 
 # Colors
 RED='\033[0;31m'
