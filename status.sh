@@ -2,7 +2,7 @@
 # Mail Address Verifier - Status Script
 
 APP_NAME="mail-address-verifier"
-APP_DIR="/opt/mail-address-verifier"
+APP_DIR="/opt/mailverify.tlx.zone"
 PID_FILE="$APP_DIR/app.pid"
 LOG_DIR="$APP_DIR/logs"
 PORT=8002

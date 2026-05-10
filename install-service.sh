@@ -3,7 +3,7 @@
 
 set -e
 
-APP_DIR="/opt/mail-address-verifier"
+APP_DIR="/opt/mailverify.tlx.zone"
 SERVICE_NAME="mail-address-verifier"
 SERVICE_FILE="$APP_DIR/$SERVICE_NAME.service"
 

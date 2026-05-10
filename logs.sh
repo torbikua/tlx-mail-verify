@@ -1,7 +1,7 @@
 #!/bin/bash
 # Mail Address Verifier - Logs Script
 
-APP_DIR="/opt/mail-address-verifier"
+APP_DIR="/opt/mailverify.tlx.zone"
 LOG_DIR="$APP_DIR/logs"
 
 # Colors

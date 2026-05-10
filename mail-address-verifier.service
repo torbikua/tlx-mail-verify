@@ -8,11 +8,11 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/opt/mail-address-verifier
-Environment=PYTHONPATH=/opt/mail-address-verifier
-Environment=PATH=/opt/mail-address-verifier/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory=/opt/mailverify.tlx.zone
+Environment=PYTHONPATH=/opt/mailverify.tlx.zone
+Environment=PATH=/opt/mailverify.tlx.zone/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-ExecStart=/opt/mail-address-verifier/venv/bin/python3 /opt/mail-address-verifier/src/main.py
+ExecStart=/opt/mailverify.tlx.zone/venv/bin/python3 /opt/mailverify.tlx.zone/src/main.py
 ExecReload=/bin/kill -HUP $MAINPID
 
 Restart=always
@@ -21,8 +21,8 @@ StartLimitInterval=60
 StartLimitBurst=3
 
 # Logging
-StandardOutput=append:/opt/mail-address-verifier/logs/app_console.log
-StandardError=append:/opt/mail-address-verifier/logs/app_console.log
+StandardOutput=append:/opt/mailverify.tlx.zone/logs/app_console.log
+StandardError=append:/opt/mailverify.tlx.zone/logs/app_console.log
 
 # Security
 NoNewPrivileges=false

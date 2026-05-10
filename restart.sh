@@ -1,7 +1,7 @@
 #!/bin/bash
 # Mail Address Verifier - Restart Script
 
-APP_DIR="/opt/mail-address-verifier"
+APP_DIR="/opt/mailverify.tlx.zone"
 
 # Colors
 GREEN='\033[0;32m'
